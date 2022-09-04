@@ -295,7 +295,7 @@ public Action Timer_MessageDelay(Handle timer, DataPack pack)
 {
     pack.Reset();
     int client = pack.ReadCell();
-    char message[128];
+    char message[2048];
     pack.ReadString(message, sizeof(message));    
     
     CPrintToChat(client, "\x01 %s", message);
