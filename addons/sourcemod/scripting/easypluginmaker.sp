@@ -6,9 +6,10 @@
 #pragma semicolon 1
 #pragma newdecls required
 
-#define PLUGIN_VERSION "1.0"
+#define PLUGIN_VERSION "1.1"
 #define MAXMENUS 16
 #define MAXCOMMANDS 32
+#define MAXSUBMENUS 32
 
 KeyValues gKV;
 
@@ -27,10 +28,17 @@ enum struct MenuStructure
 	char Title[64];
 	bool CloseButton;
 	int TimeToClose;
-	StringMap Items;
+	ArrayList Items;
 }
-
 MenuStructure MenuStruct[MAXMENUS];
+
+enum struct ItemStructure
+{
+	char Title[64];
+	char Value[128];
+	bool HasSubmenu;
+	MenuStructure Submenu;
+}
 
 enum struct WelcomeMenuStructure
 {
@@ -39,9 +47,7 @@ enum struct WelcomeMenuStructure
 	int TimeToClose;
 	ArrayList Items;
 }
-
 WelcomeMenuStructure WelcomeStruct;
-
 
 public Plugin myinfo = 
 {
@@ -125,34 +131,67 @@ public void RegisterCFG()
 				gKV.GetString("title", MenuStruct[count].Title, sizeof(MenuStruct[].Title));
 				MenuStruct[count].CloseButton = view_as<bool>(gKV.GetNum("closebutton"));
 				MenuStruct[count].TimeToClose = gKV.GetNum("timetoclose");
+				MenuStruct[count].Items = new ArrayList(sizeof(ItemStructure));
 				
 				if(gKV.JumpToKey("items"))
 				{
 					if (!gKV.GotoFirstSubKey())
 					{
-						PrintToServer("ERROR FIRST KEY");
+						PrintToServer("ERROR ITEM FIRST KEY");
 						delete gKV;
 						return;
 					}
 					
-					MenuStruct[count].Items = new StringMap();
-					int itemsCount = 0;
-					
 					do {
+						ItemStructure Item;
+						
 						if(gKV.GetSectionName(buffer, sizeof(buffer)))
 						{
-							itemsCount++;
 							char sValue[128];
 							gKV.GetString("value", sValue, sizeof(sValue));
+							strcopy(Item.Title, sizeof(Item.Title), buffer);
+							strcopy(Item.Value, sizeof(Item.Value), sValue);
 							
-							MenuStruct[count].Items.SetString(buffer, sValue);
+							if(gKV.JumpToKey("submenu"))
+							{
+								Item.HasSubmenu = true;
+								gKV.GetString("title", Item.Submenu.Title, 64);
+								Item.Submenu.CloseButton = view_as<bool>(gKV.GetNum("closebutton"));
+								Item.Submenu.TimeToClose = gKV.GetNum("timetoclose");
+								Item.Submenu.Items = new ArrayList(sizeof(ItemStructure));
+								
+								if(gKV.JumpToKey("items"))
+								{
+									gKV.GotoFirstSubKey();
+									
+									do {
+										ItemStructure SubItem;
+										
+										if(gKV.GetSectionName(buffer, sizeof(buffer)))
+										{
+											gKV.GetString("value", sValue, sizeof(sValue));
+											strcopy(SubItem.Title, sizeof(SubItem.Title), buffer);
+											strcopy(SubItem.Value, sizeof(SubItem.Value), sValue);
+											Item.Submenu.Items.PushArray(SubItem);
+										}
+									}
+									while (gKV.GotoNextKey());
+									
+									gKV.GoBack();
+									gKV.GoBack();
+								}
+								
+								gKV.GoBack();
+							}	
+							MenuStruct[count].Items.PushArray(Item);
 						}
 					}
 					while (gKV.GotoNextKey());
-					
+
 					gKV.GoBack();
 				}
 			}	
+			gKV.GoBack();			
 		}	
 		while (gKV.GotoNextKey());
 		
@@ -216,9 +255,10 @@ public void RegisterCFG()
 			
 			gKV.GoBack();
 		}
+		
+		gKV.Rewind();
 	}
 	
-		
 	gKV.Rewind();
 	delete gKV;
 }
@@ -308,15 +348,16 @@ void ExecuteMenu(int client, int index)
 	Menu menu = new Menu(Handle_Menu);
 	menu.SetTitle(MenuStruct[index].Title);
 	
-	StringMapSnapshot snapshot = MenuStruct[index].Items.Snapshot();
 	
-	for(int i = 0; i < snapshot.Length; i++)
+	for(int i = 0; i < MenuStruct[index].Items.Length; i++)
 	{
-		char display[64];
-		snapshot.GetKey(i, display, sizeof(display));
-		char callback[128];
-		MenuStruct[index].Items.GetString(display, callback, sizeof(callback));
-		menu.AddItem(callback, display);
+		ItemStructure Item;
+		MenuStruct[index].Items.GetArray(i, Item);
+		
+		char sTmp[64];
+		Format(sTmp, sizeof(sTmp), "%i|%i", index, i); // MENU INDEX | MENU ITEM INDEX
+		
+		menu.AddItem(sTmp, Item.Title);
 	}
 	
 	menu.ExitButton = MenuStruct[index].CloseButton;
@@ -327,15 +368,74 @@ public int Handle_Menu(Menu menu, MenuAction action, int client, int param)
 {
 	if(action == MenuAction_Select)
 	{
-		char info[128];
+		char info[32], buffer[2][16];
 		menu.GetItem(param, info, sizeof(info));
+		ExplodeString(info, "|", buffer, 2, 16);
 		
-		FakeClientCommand(client, "say /%s", info);
+		int menuindex = StringToInt(buffer[0]);
+		int itemindex = StringToInt(buffer[1]);
+		
+		ItemStructure Item;
+		MenuStruct[menuindex].Items.GetArray(itemindex, Item);
+		
+		FakeClientCommand(client, "say /%s", Item.Value);
+		
+		if(Item.HasSubmenu)
+			ExecuteSubmenu(client, menuindex, itemindex);
 	}
 	else if(action == MenuAction_End)
 		delete menu;
 		
 	return 0;
+}
+
+void ExecuteSubmenu(int client, int menuindex, int itemindex)
+{
+    ItemStructure Item;
+    MenuStruct[menuindex].Items.GetArray(itemindex, Item);
+    
+    Menu menu = new Menu(Handle_SubMenu);
+    menu.SetTitle(Item.Submenu.Title);
+    
+    for(int i = 0; i < Item.Submenu.Items.Length; i++)
+    {
+        ItemStructure SubItem;
+        Item.Submenu.Items.GetArray(i, SubItem);
+        
+        char sTmp[64];
+        Format(sTmp, sizeof(sTmp), "%i|%i|%i", menuindex, itemindex, i); // MENU INDEX | MENU ITEM INDEX
+        
+        menu.AddItem(sTmp, SubItem.Title);
+    }
+    
+    menu.ExitButton = Item.Submenu.CloseButton;
+    menu.Display(client, 30);
+}
+
+public int Handle_SubMenu(Menu menu, MenuAction action, int client, int param)
+{
+    if(action == MenuAction_Select)
+    {
+        char info[32], buffer[3][32];
+        menu.GetItem(param, info, sizeof(info));
+        ExplodeString(info, "|", buffer, 3, 32);
+        
+        int menuindex = StringToInt(buffer[0]);
+        int itemindex = StringToInt(buffer[1]);
+        int subitemindex = StringToInt(buffer[2]);
+        
+        ItemStructure Item;
+        MenuStruct[menuindex].Items.GetArray(itemindex, Item);
+        
+        ItemStructure SubItem;
+        Item.Submenu.Items.GetArray(subitemindex, SubItem);
+        
+        FakeClientCommand(client, "say /%s", SubItem.Value);
+    }
+    else if(action == MenuAction_End)
+        delete menu;
+        
+    return 0;
 }
 
 public void OnClientCookiesCached(int client)
