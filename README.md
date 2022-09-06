@@ -9,6 +9,7 @@ Also, you can use colors to chat things. All colors available is on cfg file.
 
 * Create your commands trigger
 * Create your menus
+* Create your submenus (nested menus)
 * Create your welcome panel
 * Create your command aliases
 * And more!
