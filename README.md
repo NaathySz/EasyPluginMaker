@@ -14,6 +14,11 @@ Also, you can use colors to chat things. All colors available is on cfg file.
 * Create your command aliases
 * And more!
 
+
+## Commands
+`sm_epm_reload` - Reload plugin config
+
+
 ## ConVars
 
 `sm_welcome_menu_enable 1/0` - Enable/Disable Welcome Panel (1 = Enable | 0 = Disable)
