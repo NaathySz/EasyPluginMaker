@@ -1,12 +1,13 @@
 #include <sourcemod>
 #include <cstrike>
 #include <clientprefs>
+#include <sdktools>
 #include <multicolors>
 
 #pragma semicolon 1
 #pragma newdecls required
 
-#define PLUGIN_VERSION "1.1"
+#define PLUGIN_VERSION "1.2"
 #define MAXMENUS 16
 #define MAXCOMMANDS 32
 #define MAXSUBMENUS 32
@@ -21,6 +22,8 @@ ArrayList g_hCmdAlreadyRegs;
 ConVar epm_welcomemenu;
 
 Cookie gCookie;
+
+int iPreviousMenuIndex[MAXPLAYERS + 1];
 
 enum struct MenuStructure
 {
@@ -37,6 +40,7 @@ enum struct ItemStructure
 	char Title[64];
 	char Value[128];
 	bool HasSubmenu;
+	bool DisableItem;
 	MenuStructure Submenu;
 }
 
@@ -63,6 +67,7 @@ public void OnPluginStart()
 	AddCommandListener(SayHook, "say");
 	AddCommandListener(SayHook, "say_team");
 	epm_welcomemenu = CreateConVar("sm_welcome_menu_enable", "1", "enable/disable welcome menu (1 = Enable | 0 = Disable)");
+	RegAdminCmd("sm_epm_reload", Command_reload_epm_config, ADMFLAG_ROOT, "Reload EasyPluginMaker Config");
 	
 	gCookie = new Cookie("welcomepanel", "if player already seen menu, then it will save. Its useful to not display every map change", CookieAccess_Protected);
 	
@@ -101,7 +106,7 @@ public void RegisterCFG()
 			char buffer[32];
 			if(gKV.GetSectionName(buffer, sizeof(buffer)))
 			{
-				char sValue[128];
+				char sValue[2048];
 				gKV.GetString("print", sValue, sizeof(sValue));
 				mCommandsList.SetString(buffer, sValue);
 			}
@@ -152,6 +157,13 @@ public void RegisterCFG()
 							strcopy(Item.Title, sizeof(Item.Title), buffer);
 							strcopy(Item.Value, sizeof(Item.Value), sValue);
 							
+							if(gKV.JumpToKey("disabled"))
+							{
+								Item.DisableItem = true;
+								
+								gKV.GoBack();
+							}
+							
 							if(gKV.JumpToKey("submenu"))
 							{
 								Item.HasSubmenu = true;
@@ -172,6 +184,14 @@ public void RegisterCFG()
 											gKV.GetString("value", sValue, sizeof(sValue));
 											strcopy(SubItem.Title, sizeof(SubItem.Title), buffer);
 											strcopy(SubItem.Value, sizeof(SubItem.Value), sValue);
+											
+											if(gKV.JumpToKey("disabled"))
+											{
+												SubItem.DisableItem = true;
+								
+												gKV.GoBack();
+											}
+											
 											Item.Submenu.Items.PushArray(SubItem);
 										}
 									}
@@ -182,7 +202,8 @@ public void RegisterCFG()
 								}
 								
 								gKV.GoBack();
-							}	
+							}
+							
 							MenuStruct[count].Items.PushArray(Item);
 						}
 					}
@@ -336,8 +357,9 @@ public Action Timer_MessageDelay(Handle timer, DataPack pack)
     pack.Reset();
     int client = pack.ReadCell();
     char message[2048];
-    pack.ReadString(message, sizeof(message));    
+    pack.ReadString(message, sizeof(message));
     
+    CheckVariables(client, message, sizeof(message));
     CPrintToChat(client, "\x01 %s", message);
     
     return Plugin_Handled;
@@ -348,16 +370,16 @@ void ExecuteMenu(int client, int index)
 	Menu menu = new Menu(Handle_Menu);
 	menu.SetTitle(MenuStruct[index].Title);
 	
-	
+	char sTmp[64];
 	for(int i = 0; i < MenuStruct[index].Items.Length; i++)
 	{
 		ItemStructure Item;
 		MenuStruct[index].Items.GetArray(i, Item);
 		
-		char sTmp[64];
 		Format(sTmp, sizeof(sTmp), "%i|%i", index, i); // MENU INDEX | MENU ITEM INDEX
 		
-		menu.AddItem(sTmp, Item.Title);
+		CheckVariables(client, Item.Title, sizeof(Item.Title));
+		menu.AddItem(sTmp, Item.Title, (Item.DisableItem)?ITEMDRAW_DISABLED:ITEMDRAW_DEFAULT);
 	}
 	
 	menu.ExitButton = MenuStruct[index].CloseButton;
@@ -381,7 +403,10 @@ public int Handle_Menu(Menu menu, MenuAction action, int client, int param)
 		FakeClientCommand(client, "say /%s", Item.Value);
 		
 		if(Item.HasSubmenu)
+		{
+			iPreviousMenuIndex[client] = menuindex;
 			ExecuteSubmenu(client, menuindex, itemindex);
+		}
 	}
 	else if(action == MenuAction_End)
 		delete menu;
@@ -397,18 +422,21 @@ void ExecuteSubmenu(int client, int menuindex, int itemindex)
     Menu menu = new Menu(Handle_SubMenu);
     menu.SetTitle(Item.Submenu.Title);
     
+    
+    char sTmp[64];
     for(int i = 0; i < Item.Submenu.Items.Length; i++)
     {
         ItemStructure SubItem;
         Item.Submenu.Items.GetArray(i, SubItem);
         
-        char sTmp[64];
         Format(sTmp, sizeof(sTmp), "%i|%i|%i", menuindex, itemindex, i); // MENU INDEX | MENU ITEM INDEX
         
-        menu.AddItem(sTmp, SubItem.Title);
+        CheckVariables(client, SubItem.Title, sizeof(SubItem.Title));
+        menu.AddItem(sTmp, SubItem.Title, (SubItem.DisableItem)?ITEMDRAW_DISABLED:ITEMDRAW_DEFAULT);
     }
     
     menu.ExitButton = Item.Submenu.CloseButton;
+    menu.ExitBackButton = true;
     menu.Display(client, 30);
 }
 
@@ -418,22 +446,35 @@ public int Handle_SubMenu(Menu menu, MenuAction action, int client, int param)
     {
         char info[32], buffer[3][32];
         menu.GetItem(param, info, sizeof(info));
-        ExplodeString(info, "|", buffer, 3, 32);
         
-        int menuindex = StringToInt(buffer[0]);
-        int itemindex = StringToInt(buffer[1]);
-        int subitemindex = StringToInt(buffer[2]);
-        
-        ItemStructure Item;
-        MenuStruct[menuindex].Items.GetArray(itemindex, Item);
-        
-        ItemStructure SubItem;
-        Item.Submenu.Items.GetArray(subitemindex, SubItem);
-        
-        FakeClientCommand(client, "say /%s", SubItem.Value);
+        if(StrEqual(info, "goback"))
+        {
+        	ExecuteMenu(client, iPreviousMenuIndex[client]);
+        }
+        else
+        {
+	        ExplodeString(info, "|", buffer, 3, 32);
+	        
+	        int menuindex = StringToInt(buffer[0]);
+	        int itemindex = StringToInt(buffer[1]);
+	        int subitemindex = StringToInt(buffer[2]);
+	        
+	        ItemStructure Item;
+	        MenuStruct[menuindex].Items.GetArray(itemindex, Item);
+	        
+	        ItemStructure SubItem;
+	        Item.Submenu.Items.GetArray(subitemindex, SubItem);
+	        
+	        FakeClientCommand(client, "say /%s", SubItem.Value);
+		}
     }
-    else if(action == MenuAction_End)
-        delete menu;
+   	else if(action == MenuAction_Cancel)
+	{
+		if(param == MenuCancel_ExitBack)
+			ExecuteMenu(client, iPreviousMenuIndex[client]);
+	}
+	else if(action == MenuAction_End)
+		delete menu;
         
     return 0;
 }
@@ -464,12 +505,76 @@ void MenuWelcome(int client)
 	Panel panel = new Panel();
 	panel.SetTitle(WelcomeStruct.Title);
 
+	char text[256];
 	for(int i = 0; i < WelcomeStruct.Items.Length; i++)
 	{
-		char text[256];
 		WelcomeStruct.Items.GetString(i, text, sizeof(text));
+		CheckVariables(client, text, sizeof(text));
 		panel.DrawText(text);
 	}
 
 	panel.Send(client, Handle_Menu, WelcomeStruct.TimeToClose);
+}
+
+public Action Command_reload_epm_config(int client, int args)
+{
+	RegisterCFG();
+	ReplyToCommand(client, "[EasyPluginMaker] Configs reloaded successfully.");
+	
+	return Plugin_Handled;
+}
+
+void CheckVariables(int client, char[] buffer, int maxlen)
+{
+	char sTmp[512];
+
+	if (StrContains(buffer, "{USERID}", false))
+	{
+		IntToString(GetClientUserId(client), sTmp, sizeof(sTmp));
+		ReplaceString(buffer, maxlen, "{USERID}", sTmp);
+	}
+	
+	if (StrContains(buffer, "{PLAYERNAME}", false)) 
+	{
+		Format(sTmp, sizeof(sTmp), "%N", client);
+		ReplaceString(buffer, maxlen, "{PLAYERNAME}", sTmp);
+	}
+	
+	if (StrContains(buffer, "{STEAM32}", false))
+	{
+		GetClientAuthId(client, AuthId_Steam2, sTmp, sizeof(sTmp));
+		ReplaceString(buffer, maxlen, "{STEAM32}", sTmp);
+	}
+	
+	if (StrContains(buffer, "{PING}", false)) 
+	{
+		Format(sTmp, sizeof(sTmp), "%d", GetEntProp(GetPlayerResourceEntity(), Prop_Send, "m_iPing", _, client));
+		ReplaceString(buffer, maxlen, "{PING}", sTmp);
+	}
+	
+	if (StrContains(buffer, "{SECTION_TIME}", false)) 
+	{
+		Format(sTmp, sizeof(sTmp), "%s", FormatShortTime(RoundToFloor(GetClientTime(client))));
+		ReplaceString(buffer, maxlen, "{SECTION_TIME}", sTmp);
+	}
+}
+
+char FormatShortTime(int time) {
+	char Time[12];
+	int g_iHours = 0;
+	int g_iMinutes = 0;
+	int g_iSeconds = time;
+	
+	while (g_iSeconds > 3600) {
+		g_iHours++;
+		g_iSeconds -= 3600;
+	}
+	while (g_iSeconds > 60) {
+		g_iMinutes++;
+		g_iSeconds -= 60;
+	}
+	if (g_iHours >= 1)Format(Time, sizeof(Time), "%d:%d:%d", g_iHours, g_iMinutes, g_iSeconds);
+	else if (g_iMinutes >= 1)Format(Time, sizeof(Time), "  %d:%d", g_iMinutes, g_iSeconds);
+	else Format(Time, sizeof(Time), "   %d", g_iSeconds);
+	return Time;
 }
