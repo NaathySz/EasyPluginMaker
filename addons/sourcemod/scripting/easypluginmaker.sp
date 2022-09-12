@@ -156,13 +156,7 @@ public void RegisterCFG()
 							gKV.GetString("value", sValue, sizeof(sValue));
 							strcopy(Item.Title, sizeof(Item.Title), buffer);
 							strcopy(Item.Value, sizeof(Item.Value), sValue);
-							
-							if(gKV.JumpToKey("disabled"))
-							{
-								Item.DisableItem = true;
-								
-								gKV.GoBack();
-							}
+							Item.DisableItem = view_as<bool>(gKV.GetNum("disabled"));
 							
 							if(gKV.JumpToKey("submenu"))
 							{
@@ -184,13 +178,7 @@ public void RegisterCFG()
 											gKV.GetString("value", sValue, sizeof(sValue));
 											strcopy(SubItem.Title, sizeof(SubItem.Title), buffer);
 											strcopy(SubItem.Value, sizeof(SubItem.Value), sValue);
-											
-											if(gKV.JumpToKey("disabled"))
-											{
-												SubItem.DisableItem = true;
-								
-												gKV.GoBack();
-											}
+											SubItem.DisableItem = view_as<bool>(gKV.GetNum("disabled"));
 											
 											Item.Submenu.Items.PushArray(SubItem);
 										}
