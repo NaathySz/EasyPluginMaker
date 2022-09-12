@@ -7,7 +7,7 @@
 #pragma semicolon 1
 #pragma newdecls required
 
-#define PLUGIN_VERSION "1.2"
+#define PLUGIN_VERSION "1.2.1"
 #define MAXMENUS 16
 #define MAXCOMMANDS 32
 #define MAXSUBMENUS 32
@@ -69,7 +69,7 @@ public void OnPluginStart()
 	epm_welcomemenu = CreateConVar("sm_welcome_menu_enable", "1", "enable/disable welcome menu (1 = Enable | 0 = Disable)");
 	RegAdminCmd("sm_epm_reload", Command_reload_epm_config, ADMFLAG_ROOT, "Reload EasyPluginMaker Config");
 	
-	gCookie = new Cookie("welcomepanel", "if player already seen menu, then it will save. Its useful to not display every map change", CookieAccess_Protected);
+	gCookie = new Cookie("welcomepanel", "if player already see panel, then it will save. Its useful to not display every map change", CookieAccess_Protected);
 	
 	AutoExecConfig(true, "EasyPluginMaker");
 	RegisterCFG();
@@ -503,6 +503,7 @@ public Action Timer_Welcome(Handle timer, int client)
 void MenuWelcome(int client)
 {
 	Panel panel = new Panel();
+	CheckVariables(client, WelcomeStruct.Title, sizeof(WelcomeStruct.Title));
 	panel.SetTitle(WelcomeStruct.Title);
 
 	char text[256];
