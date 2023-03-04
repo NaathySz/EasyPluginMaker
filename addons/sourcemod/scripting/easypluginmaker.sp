@@ -96,7 +96,7 @@ public void RegisterCFG()
 	{
 		if (!gKV.GotoFirstSubKey())
 		{
-			PrintToServer("ERROR IN MENU FIRST KEY");
+			PrintToServer("ERROR IN CHAT FIRST KEY");
 			delete gKV;
 			return;
 		}
