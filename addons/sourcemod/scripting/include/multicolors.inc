@@ -5,8 +5,8 @@
 
 #define MuCo_VERSION "2.1.2"
 
-#include <morecolors>
-#include <colors>
+#include "multicolors/morecolors"
+#include "multicolors/colors"
 
 /*
 *
@@ -391,6 +391,7 @@ stock void CShowActivityEx(int author, const char[] tag, const char[] message, a
 		MC_ShowActivity2(author, tag, "%s", buffer);
 	}
 }
+
 
 /**
  * Replaces color tags in a string with color codes

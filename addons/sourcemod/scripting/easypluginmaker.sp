@@ -1,5 +1,4 @@
 #include <sourcemod>
-#include <cstrike>
 #include <clientprefs>
 #include <sdktools>
 #include <multicolors>
